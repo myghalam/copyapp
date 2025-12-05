@@ -289,6 +289,18 @@ tfoot td {
   color:#fff;
 }
 
+
+.btn-new-top {
+  padding:6px 14px;
+  border-radius:20px;
+  border:none;
+  cursor:pointer;
+  font-size:12pt;
+  font-family:"B Homa",Tahoma,sans-serif;
+  background:#43a047;
+  color:#fff;
+  margin-right:24px;
+}
 /* مودال‌ها */
 .modal{
   position:fixed;
@@ -906,6 +918,7 @@ tfoot td {
           <button type="button" id="btnOpenOrders" class="btn-open-orders">سفارش‌های باز</button>
           <button type="button" id="btnCashFromBox">صندوق</button>
           <button type="button" data-page="users" id="btnUsersPage">کاربران</button>
+          <button type="button" id="btnNewOrderTop" class="btn-new-top">سفارش جدید</button>
         </div>
       </div>
     </div>
@@ -2367,6 +2380,8 @@ tfoot td {
       <button id="btnSaveTariffs">💾 ذخیره تعرفه‌ها</button>
       <button id="btnLoadTariffs">📥 بازیابی تعرفه‌ها</button>
       <button id="btnResetTariffs">↩ بازگردانی مقادیر نمونه</button>
+      <button id="btnShowCostPrices">💰 قیمت‌های تمام‌شده</button>
+      <button id="btnShowGeneralCosts">📚 هزینه‌های عمومی</button>
     </div>
 
     <!-- ===================== سیاه و سفید (دورو مبنا) ===================== -->
@@ -6192,6 +6207,7 @@ const orders = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
 
         localStorage.setItem(STORAGE_KEY, JSON.stringify(orders));
         loadDailyOpenOrders(); // بروزرسانی جدول
+        updateOpenOrdersButtonState(); // بروزرنگ دکمه سفارش‌های باز
       }
     }
   });
@@ -6806,18 +6822,20 @@ const orders = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
 
   // کلاس دکمه سفارش‌های باز
   function getOpenOrdersButtonClass(orders) {
-    const todayFa = (new Date()).toLocaleDateString("fa-IR");
-
-    const openOrders = orders.filter(o => {
-      if (!o.dateTime) return false;
-      const datePart = o.dateTime.split(" ")[0];
-      const isToday = (datePart === todayFa);
+    const openOrders = (orders || []).filter(o => {
+      if (!o) return false;
+      const status = o.status || "";
+      const isNotDelivered = status !== "delivered";
       const isCarry = !!o.carryToTomorrow;
-      const isNotDelivered = (o.status !== "delivered");
-      return (isToday || isCarry) && isNotDelivered;
+      const isInProgress = status === "in_progress";
+      const isReady = status === "ready";
+      return isNotDelivered && (isCarry || isInProgress || isReady);
     });
 
     if (openOrders.length === 0) return "open-green";
+
+    const hasUrgent = openOrders.some(o => (o.status === "in_progress") || !!o.carryToTomorrow);
+    if (hasUrgent) return "open-red";
 
     const hasReady = openOrders.some(o => o.status === "ready");
     if (hasReady) return "open-yellow";
@@ -6852,18 +6870,24 @@ const orders = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
   function showOpenOrdersModal() {
     openOrdersBody.innerHTML = "";
     const orders = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-    const todayFa = (new Date()).toLocaleDateString("fa-IR");
     let idx = 0;
 
-    orders.forEach(o => {
+    const openOrders = orders.filter(o => {
+      if (!o) return false;
+      const status = o.status || "";
+      const isNotDelivered = status !== "delivered";
+      const isCarry = !!o.carryToTomorrow;
+      const isInProgress = status === "in_progress";
+      const isReady = status === "ready";
+      // سفارش باز: در حال انجام، آماده/تحویل نشده، یا انتقال به فردا (و تحویل نشده)
+      return isNotDelivered && (isCarry || isInProgress || isReady);
+    });
+
+    openOrders.forEach(o => {
       if (!o.dateTime) return;
       const datePart = o.dateTime.split(" ")[0];
-      const isToday = (datePart === todayFa);
-      const isCarry = !!o.carryToTomorrow;
-      const isNotDelivered = (o.status !== "delivered");
-      if (!(isToday || isCarry) || !isNotDelivered) return;
-
-      const carryFromYesterday = isCarry && (datePart !== todayFa);
+      const todayFa = (new Date()).toLocaleDateString("fa-IR");
+      const carryFromYesterday = !!o.carryToTomorrow && (datePart !== todayFa);
 
       idx++;
       const tr = document.createElement("tr");
@@ -6875,7 +6899,7 @@ const orders = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
         <td>${statusText}</td>
         <td>${o.customerName || "بدون نام"}</td>
         <td></td>
-        <td>${carryFromYesterday ? "بله" : "خیر"}</td>
+        <td>${carryFromYesterday ? "بله" : (o.carryToTomorrow ? "بله" : "خیر")}</td>
         <td>
           <button type="button"
                   class="btn-small"
@@ -6890,7 +6914,7 @@ const orders = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
 
     if (idx === 0) {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td colspan="6">سفارش فعالی برای امروز ثبت نشده است.</td>`;
+      tr.innerHTML = `<td colspan="6">هیچ سفارش بازی (در حال انجام، انتقالی یا آماده/تحویل‌نشده) یافت نشد.</td>`;
       openOrdersBody.appendChild(tr);
     }
 
@@ -7613,6 +7637,14 @@ const orders = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
     updateOrderTotal();
   });
 
+
+  const btnNewOrderTop = document.getElementById("btnNewOrderTop");
+  if (btnNewOrderTop) {
+    btnNewOrderTop.addEventListener("click", () => {
+      const btnNewOrder = document.getElementById("btnNewOrder");
+      if (btnNewOrder) btnNewOrder.click();
+    });
+  }
 // چاپ رسید سفارش مشتری
 document.getElementById("btnPrintReceipt").addEventListener("click", () => {
 
